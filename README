@@ -1,0 +1,24 @@
+Signals
+=======
+
+BE CAREFUL in Beta yet!!
+
+in application layout add, after javascripts include tag :
+
+	<%= activeSignalsJavascript %>
+
+or if you don't want default timeout
+
+	<%= activeSignalsJavascript {:timeActive => XX, :timeInactive => XXXX} %>
+
+After you can send event in your code with :
+
+	SignalEvent.emit(target, paramsevent);
+
+
+MORE DOCUMENTATION must be provided later!!!
+
+
+
+
+Copyright (c) 2009-2010 Florent Ruard-Dumaine, released under the MIT license
