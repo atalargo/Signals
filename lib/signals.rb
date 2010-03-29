@@ -1,5 +1,6 @@
 # Signals
 require 'signals/helpers'
+require 'signals/filter'
 
 module SignalsEvent
 
@@ -33,7 +34,11 @@ module SignalsEvent
 			end
 		end
 	end
+
 end
 ActionController::Routing::RouteSet::Mapper.send(:include, SignalsEvent::Routing::MapperExtensions)
-
 ApplicationController.send(:include, SignalsEvent::ControllerExtensions)
+
+class ActionController::Base
+    after_filter SignalsEvent::Filter
+end
