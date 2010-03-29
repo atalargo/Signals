@@ -2,14 +2,16 @@ class SignalEvent < ActiveRecord::Base
 	set_table_name 'signals'
 	belongs_to :signalable, :polymorphic => true
 	serialize :params
-	@@end_in = 5.minutes.from_now
+	@@end_in = 5.minutes
 
-	def self.check(instance)
-		signalhistories = SignalHistory.find(:all, :conditions => ['user_id = ? AND signalable_type = ? AND signalable_id = ? AND end_at < ?', current_user.id, instance.class.name, instance.id, Time.new])
+	def self.check(instance, current_user = nil)
 		msids = ''
-		msids = ' AND id NOT IN ('+signalhistories.collect{|sh|sh.signal_id}.join(',')+') ' if signalhistories.size > 0 ##don't take already taked multiple signals
+		unless current_user.nil?
+			signalhistories = SignalHistory.find(:all, :conditions => ['user_id = ? AND signalable_type = ? AND signalable_id = ? AND end_at > ?', current_user.id, instance.class.name, instance.id, Time.new])
+			msids = ' AND id NOT IN ('+signalhistories.collect{|sh|sh.signal_id}.join(',')+') ' if signalhistories.size > 0 ##don't take already taked multiple signals
+		end
 
-		signals = SignalEvent.find(:all, {:conditions => ['signalable_type = ? AND signalable_id = ? AND end_at < ? '+msids, instance.class.name, instance.id, Time.new]})
+		signals = SignalEvent.find(:all, {:conditions => ['signalable_type = ? AND signalable_id = ? AND end_at > ? '+msids, instance.class.name, instance.id, Time.new]})
 		sids = signals.collect{|s| (s.multiple ? nil : s.id)}.delete_if{|tid|tid.nil?}.join(',')
 		sids = ' OR id IN ('+sids+') ' unless sids.empty?
 		signals.each do |ms|
@@ -26,8 +28,9 @@ class SignalEvent < ActiveRecord::Base
 			end
 		end
 
-		SignalEvent.connection.execute( "DELETE FROM signals WHERE end_at < '#{Time.new.utc}' #{sids};") # clean all old and all finded
-		SignalHistory.connection.execute("DELETE FROM signal_histories WHERE end_at < '#{Time.new.utc}';") # clean all old histories
+		t = Time.new.utc
+		SignalEvent.connection.execute( "DELETE FROM signals WHERE end_at < '#{t}' #{sids};") # clean all old and all finded
+		SignalHistory.connection.execute("DELETE FROM signal_histories WHERE end_at < '#{t}';") # clean all old histories
 		signals
 	end
 
@@ -41,11 +44,11 @@ class SignalEvent < ActiveRecord::Base
 		s = SignalEvent.new
 		options = options ||{}
 		s.signalable = instance
-		s.end_at = (options[:end_in] || @@end_in)
+		s.end_at = (options[:end_in] || @@end_in.from_now)
 		s.multiple = options[:multiple] unless options[:multiple].nil?
 		s.params = options[:params] unless options[:params].nil?
 		s.crud = (options[:crud].nil? ? 'update' : options[:crud].to_s)
-		s.qname = options[:qName]
+		s.qname = options[:qname]
 
 		extracond = ( s.params == nil ? ' params IS NULL ' : ' params = ? ')
 		conditions = ['signalable_type = ? AND signalable_id = ? AND end_at < ? AND qname = ? AND crud = ? AND multiple = ? AND '+extracond, instance.class.name, instance.id, Time.new, s.qname, s.crud, s.multiple]

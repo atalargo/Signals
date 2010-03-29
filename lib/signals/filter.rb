@@ -15,7 +15,7 @@ module SignalsEvent
 									sigs[:u].push signal.to_struct
 								end
 							rescue => e
-								RAILS_DEFAULT_LOGGER.debug('Plugin Signals Error: ' + e.message)
+								RAILS_DEFAULT_LOGGER.error('Plugin Signals Error: ' + e.message)
 								sigs[:e] = ['error '+e.message]
 							end
 
@@ -25,12 +25,14 @@ module SignalsEvent
 										sigs[:u].push signal.to_struct
 									end
 								rescue => e
-										RAILS_DEFAULT_LOGGER.debug('Plugin Signals Error SignalsLib : ' + e.message)
+										RAILS_DEFAULT_LOGGER.error('Plugin Signals Error SignalsLib : ' + e.message)
 										sigs[:e] = ['error '+e.message]
 								end
 							end
 						end
 					rescue => e
+						RAILS_DEFAULT_LOGGER.error('Plugin Signals Error: ' + e.message)
+						sigs[:e] = ['error '+e.message]
 					end
 
 					sigs[:t] = Time.new.utc.to_i
