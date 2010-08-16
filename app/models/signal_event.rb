@@ -1,79 +1,110 @@
-class SignalEvent < ActiveRecord::Base
-	set_table_name 'signals'
-	belongs_to :signalable, :polymorphic => true
-	serialize :params
+case SignalsEvent::backend
+when 'ar' then require ::File.expand_path('../backends/signal_event_ar.rb',  __FILE__)
+when 'mongoid' then require ::File.expand_path('../backends/signal_event_mongoid.rb',  __FILE__)
+end
+
+
+
+class SignalEvent
+
 	@@end_in = 5.minutes
 
-	def self.check(instance, current_user = nil)
-		msids = ''
-		unless current_user.nil?
-			signalhistories = SignalHistory.find(:all, :conditions => ['user_id = ? AND signalable_type = ? AND signalable_id = ? AND end_at > ?', current_user.id, instance.class.name, instance.id, Time.new])
-			msids = ' AND id NOT IN ('+signalhistories.collect{|sh|sh.signal_id}.join(',')+') ' if signalhistories.size > 0 ##don't take already taked multiple signals
-		end
+	def to_struct
+		{:type => self.qname, :crud => self.crud, :params => ActiveSupport::JSON.decode(self.params)}
+	end
 
-		signals = SignalEvent.find(:all, {:conditions => ['signalable_type = ? AND signalable_id = ? AND end_at > ? '+msids, instance.class.name, instance.id, Time.new]})
-		sids = signals.collect{|s| (s.multiple ? nil : s.id)}.delete_if{|tid|tid.nil?}.join(',')
-		sids = ' OR id IN ('+sids+') ' unless sids.empty?
-		signals.each do |ms|
-			next if !ms.multiple
-			begin
-				sh = SignalHistory.new
-				sh.signalable = ms.signalable
-				sh.signal_id = ms.id
-				sh.user_id = current_user.id
-				sh.end_at = ms.end_at
-				sh.save
-			rescue => e
-				RAILS_DEFAULT_LOGGER.debug('SignalHistory add error : '+e.message)
+
+	def self.check(instance, current_user = nil, session = nil)
+		msids = []
+		t = Time.new.to_i
+
+		unless current_user.nil?
+			shs = SignalHistory.find_for(instance, current_user, t.to_i)
+			msids = shs.collect{|sh| sh.signal_id} ##don't take already taked multiple signals
+		end
+Rails.logger.info("MSIDS #{msids} #{current_user}")
+		sigs = SignalEvent.find_for(instance, t.to_i, msids)
+		signals = []
+		sids = sigs.collect{|s| signals.push(s); (s.multiple ? nil : s.id)}.delete_if{|tid|tid.nil?}
+
+		unless current_user.nil?
+Rails.logger.info("MSIDS #{signals}")
+			signals.each do |ms|
+Rails.logger.info("MSIDS #{ms} #{ms.multiple}")
+				next if !(ms.multiple)
+				begin
+					sh = SignalHistory.new
+					sh.signalable_type = ms.signalable_type
+					sh.signalable_id = ms.signalable_id
+					sh.signal_id = ms._id
+					sh.user_id = current_user.id
+					sh.end_at = ms.end_at
+					sh.save
+				rescue => e
+	 				Rails.logger.info('SignalHistory add error : '+e.message)
+				end
 			end
 		end
 
-		t = Time.new.utc
-		SignalEvent.connection.execute( "DELETE FROM signals WHERE end_at < '#{t}' #{sids};") # clean all old and all finded
-		SignalHistory.connection.execute("DELETE FROM signal_histories WHERE end_at < '#{t}';") # clean all old histories
+		SignalEvent.clean(t.to_i, sids)
+		SignalHistory.clean(t.to_i)
+
+ 		unless session.nil? || session['signals_cur'].nil?
+			## recup signals saved in session in place of db because receiver was only the current user
+			session['signals_cur'].each{|si| signals.push(si)}
+			session.delete('signals_cur')
+ 		end
+
 		signals
 	end
 
-#	def after_find
+	def self.emit(instance, options, current_user = nil, session = nil)
 
-#		(self.destroy) if( self.multiple == false || self.end_date < Time.new)
-
-#	end
-
-	def self.emit(instance, options)
+		end_in = if SignalsEvent::default_end_in.nil?
+				@@end_in
+			 else
+				SignalsEvent::default_end_in
+			end
 		s = SignalEvent.new
 		options = options ||{}
-		s.signalable = instance
-		s.end_at = (options[:end_in] || @@end_in.from_now)
+		s.signalable_type = instance.class.name
+		s.signalable_id = instance.id
+		s.end_at = (options[:end_in] || (Time.new + end_in)).to_i
 		s.multiple = options[:multiple] unless options[:multiple].nil?
-		s.params = options[:params] unless options[:params].nil?
+		s.params = options[:params].to_json unless options[:params].nil?
 		s.crud = (options[:crud].nil? ? 'update' : options[:crud].to_s)
 		s.qname = options[:qname]
 
-		extracond = ( s.params == nil ? ' params IS NULL ' : ' params = ? ')
-		conditions = ['signalable_type = ? AND signalable_id = ? AND end_at < ? AND qname = ? AND crud = ? AND multiple = ? AND '+extracond, instance.class.name, instance.id, Time.new, s.qname, s.crud, s.multiple]
-		conditions.push s.params unless s.params.nil?
 
-		sn = SignalEvent.find(:all, :conditions => conditions)#['signalable_type = ? AND signalable_id = ? AND end_at < ? AND qname = ? AND crud = ? AND multiple = ? AND '+extracond, instance.class.name, instance.id, Time.new, s.qname, s.crud, s.multiple, s.params])
-		if sn.size > 0
-			# update existants in this case
-			# push end_at later
-			sn.first.end_at = s.end_at
-			sn.first.save
-		else
-			s.save
+		if (SignalsEvent.automerge && (options[:automerge].nil? || options[:automerge] == true)) || (!SignalsEvent.automerge && (!options[:automerge].nil? || options[:automerge] == true))
+			#sn = SignalEvent.criteria.where(:signalable_type => instance.class.name, :signalable_id => instance.id, :end_at.lt => s.end_at, :qname => s.qname, :crud => s.crud, :multiple => s.multiple, :params => s.params).all
+			sn = SignalEvent.find_for_automerge(s)
+			Rails.logger.info(sn)
+			Rails.logger.info(sn.count)
+			if sn.count > 0
+				# update existants in this case
+				# push end_at later
+				sa = sn.first
+				sa.end_at = s.end_at
+				sa.save
+				return
+			end
 		end
 
+		s.save unless self.store_in_session?(instance, current_user, s, session)
 	end
 
-	def to_struct
-		{:type => self.qname, :crud => self.crud, :params => self.params}
+	protected
+	def self.store_in_session?(instance, current_user, signal, session)
+		unless current_user.nil? || signal.multiple || session.nil?
+			if current_user == instance
+				## current_user is the unique receiver of the signal, don't save in db and put it in current session to be send at the end of the current query
+				session['signals_cur'] = [] if session['signals_cur'].nil?
+				session['signals_cur'].push(signal)
+				return true
+			end
+		end
+		false
 	end
 
-	private
-	def delete_now
-		self.connection.execute("DELETE FROM signals WHERE id =#{self.id};")
-		self.connection.execute("DELETE FROM signal_histories WHERE signal_id =#{self.id};")
-	end
 end
-

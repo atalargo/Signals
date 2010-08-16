@@ -2,7 +2,7 @@
 var Signals = {timeActive: 10, timeInactive: 120, delayInactive: 100 };//en seconde
 Signals.check = function(pe) {
 	pe.stop();
-	 new Ajax.Request(Signals.prefix+'/signals/check', {
+	 new Ajax.Request('http://'+Signals.prefix+'/signals/check', {
 	 	method:'get'
 	 });
 };
@@ -31,6 +31,7 @@ Signals.checkMouse = function() {
 }
 
 Signals.init = function(pref, options) {
+try{
 	options = options || {};
 	if(options['timeActive'])
 		Signals.timeActive = options['timeActive'];
@@ -52,7 +53,8 @@ Signals.init = function(pref, options) {
 				}
 
 			}
-			Signals.checkStart();
+			if (Signals.stop_by_hand == undefined)
+				Signals.checkStart();
 		}
 	});
 	Signals.checkStart();
@@ -60,15 +62,13 @@ Signals.init = function(pref, options) {
 	Event.observe(document, 'keydown', Signals.active);
 	Event.observe(document, 'mousemove', Signals.active);
 	Event.observe(document, 'click', Signals.active);
-
+}catch(e){console.log(e);}
 };
 
 Signals.signals = function(jsond) {
 	var signals = jsond;
-console.log(signals);
-
 	if(signals['e']) {
-		console.log('error ==> ' +signals['e']);
+		console.log('Signales up an error ==> ' +signals['e']);
 	}
 	if(signals['u']) {
 		signals['u'].each(function(signal) {
@@ -79,7 +79,8 @@ console.log(signals);
 		});
 	}
 
-	Signals.checkStart();
+	if (Signals.stop_by_hand == undefined)
+		Signals.checkStart();
 };
 Signals.registre = [];
 Signals.regEvent = function(ev, callback) {
@@ -98,6 +99,25 @@ Signals.clean = function() {
 		Event.stopObserve(document, 'signals:'+dev[0], dev[1]);
 	});
 	Signals.registre = [];
+};
+Signals.change_check_time = function(newTime) {
+	Signals.timeActive = newTime;
+};
+Signals.change_check_time_inactive = function(newTime) {
+	Signals.timeInactive = newTime;
+};
+Signals.change_inactive_time = function(newTime) {
+	Signals.delayInactive = newTime;
+};
+
+Signals.desactive_check = function() {
+	Signals.pe.stop();
+	Signals.stop_by_hand = true;
+};
+
+Signals.resactive_check = function() {
+	Signals.checkStart();
+	Signals.stop_by_hand = undefined;
 };
 /*
 Signals.init(pref);

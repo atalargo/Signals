@@ -1,0 +1,25 @@
+class SignalHistory
+	include Mongoid::Document
+	field :signalable_type
+	field :signalable_id
+	field :end_at, :type => Integer
+	field :signal_id, :type => Object
+	field :user_id, :type => Object
+
+	index([:user_id, :signalable_type, :signalable_id])
+	index :end_at
+
+	attr_protected :_id
+
+	store_in :signal_histories
+
+	def self.clean(time =nil)
+		time ||= Time.new.to_i
+ 		Mongoid::Persistence::RemoveAll.new(SignalHistory, {}, {:end_at => {'$lt' => time.to_i}}).persist
+	end
+
+	def self.find_for(instance, user, time)
+		SignalHistory.where(:user_id => user.id, :signalable_type => instance.class.name, :signalable_id => instance.id,  :end_at.gt => time.to_i)
+	end
+end
+

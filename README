@@ -16,8 +16,22 @@ After you can send event in your code with :
 	SignalEvent.emit(target, paramsevent);
 
 
+ - Now Signals could use differents backend : Mongoid or ActiveRecord (if you use Mongoid backend you can pass ActiveRecord target, it's not a problem, reverse it's not possible yet)
+ - Now it's compatible with Rails 3!!
+
 MORE DOCUMENTATION must be provided later!!!
 
+
+to configure the plugin you must provide an initializer like this :
+
+*********
+
+SignalsEvent.backend = 'mongoid' # or 'ar' for activerecord
+SignalsEvent.default_end_in = 10.seconds # default is 5 minutes if not changed here
+
+require 'lib/signals_lib' #if you provide your own SignalsLib Checker load them here
+
+*************
 
 
 
